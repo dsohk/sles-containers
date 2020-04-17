@@ -1,41 +1,33 @@
+FROM registry.suse.com/suse/sle15:15.1
+LABEL maintainer="SUSE CaaSP and CAP - Sample Apps"
 
-### Multi-stage Docker file - maven build for java ###
+# -------------------------------------------------------------------------------
 
-## Stage 1/2 - Build fat JAR file with maven
-FROM maven:3-jdk-8-slim as builder
+# Import TLS cert from SUSE SMT/RMT Server
+# Uncomment the line below if you are using SMT Server
+# ADD http://<SMT/RMT SERVER>/rmt.crt /etc/pki/trust/anchors/smt.crt
+ADD http://rmt.suse.lab/rmt.crt /etc/pki/trust/anchors/smt.crt
 
-RUN mkdir -p /build
-WORKDIR /build
-COPY pom.xml /build
+# Import CA cert from SUSE Manager
+# Comment the line below out if you are not using SUSE Manager in the docker host.
+ADD cert/RHN-ORG-TRUSTED-SSL-CERT /etc/pki/trust/anchors/
 
-# download all required dependencies into a single layer that won't change unless there's a change in pom.xml
-RUN mvn -B dependency:resolve dependency:resolve-plugins
+# update CA cert
+RUN update-ca-certificates
 
-#Copy source code
-COPY src /build/src
+# Copy all SLES zypper repos into the container
+ADD etc/ /etc/zypp/
+RUN zypper refs && zypper refresh
 
-# Build application
-RUN mvn package
+# -------------------------------------------------------------------------------
 
+# All repos are ready
+# Start my own docker build below
 
-## Stage 2/2 - Containerize the standalone JAR application
-FROM suserepublic/sle15sp1-openjdk11:11.0.6 as runtime
-EXPOSE 8080
+RUN zypper --non-interactive in java-11-openjdk
 
-ENV APP_HOME /app
-ENV JAVA_OPTS=""
+ENV JAVA_HOME=/usr/lib64/jvm/java
+ENV PATH="$JAVA_HOME/bin:/usr/local/bin:/usr/bin:/bin"
 
-RUN mkdir $APP_HOME
-# store externalized config files and logs
-RUN mkdir $APP_HOME/config
-RUN mkdir $APP_HOME/log
-
-VOLUME $APP_HOME/config
-VOLUME $APP_HOME/log
-
-WORKDIR $APP_HOME
-COPY --from=builder /build/target/*.jar app.jar
-
-ENTRYPOINT [ "sh", "-c", "java $JAVA_OPTS -Djava.security.egd=file:/dev/./urandom -jar app.jar $0 $@" ]
-
+CMD ["/bin/bash", "-c", "cat /etc/os-release"]
 
